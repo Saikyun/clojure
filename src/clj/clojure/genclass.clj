@@ -426,7 +426,7 @@
               mm (mapcat #(.getMethods ^Class %) interfaces))
                                         ;extra methods
        (doseq [[mname pclasses rclass :as msig] methods]
-         (emit-forwarding-method mname pclasses rclass (:static (meta msig))
+         (emit-forwarding-method mname pclasses rclass (:static (meta msig)) (:native (meta msig))
                                  emit-unsupported))
                                         ;expose specified overridden superclass methods
        (doseq [[local-mname ^java.lang.reflect.Method m] (reduce1 (fn [ms [[name _ _] m]]
