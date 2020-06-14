@@ -191,7 +191,7 @@
                                                                impl-pkg-name "/" prefix (.getName m)
                                                                " not defined?)"))))
         emit-forwarding-method
-        (fn [name pclasses rclass as-static else-gen]
+        (fn [name pclasses rclass as-static as-native else-gen]
           (let [mname (str name)
                 pmetas (map meta pclasses)
                 pclasses (map the-class pclasses)
@@ -200,7 +200,9 @@
                 rtype ^Type (totype rclass)
                 m (new Method mname rtype ptypes)
                 is-overload (seq (overloads mname))
-                gen (new GeneratorAdapter (+ (. Opcodes ACC_PUBLIC) (if as-static (. Opcodes ACC_STATIC) 0)) 
+                gen (new GeneratorAdapter (+ (. Opcodes ACC_PUBLIC)
+                                             (if as-static (. Opcodes ACC_STATIC) 0)
+                                             (if as-native (. Opcodes ACC_NATIVE) 0))
                          m nil nil cv)
                 found-label (. gen (newLabel))
                 else-label (. gen (newLabel))
@@ -208,49 +210,50 @@
             (add-annotations gen (meta name))
             (dotimes [i (count pmetas)]
               (add-annotations gen (nth pmetas i) i))
-            (. gen (visitCode))
-            (if (> (count pclasses) 18)
-              (else-gen gen m)
-              (do
-                (when is-overload
-                  (emit-get-var gen (overload-name mname pclasses))
-                  (. gen (dup))
-                  (. gen (ifNonNull found-label))
-                  (. gen (pop)))
-                (emit-get-var gen mname)
-                (. gen (dup))
-                (. gen (ifNull else-label))
-                (when is-overload
-                  (. gen (mark found-label)))
-                                        ;if found
-                (.checkCast gen ifn-type)
-                (when-not as-static
-                  (. gen (loadThis)))
-                                        ;box args
-                (dotimes [i (count ptypes)]
-                  (. gen (loadArg i))
-                  (. clojure.lang.Compiler$HostExpr (emitBoxReturn nil gen (nth pclasses i))))
-                                        ;call fn
-                (. gen (invokeInterface ifn-type (new Method "invoke" obj-type 
-                                                      (to-types (replicate (+ (count ptypes)
-                                                                              (if as-static 0 1)) 
-                                                                           Object)))))
-                                        ;(into-array (cons obj-type 
-                                        ;                 (replicate (count ptypes) obj-type))))))
-                                        ;unbox return
-                (. gen (unbox rtype))
-                (when (= (. rtype (getSort)) (. Type VOID))
-                  (. gen (pop)))
-                (. gen (goTo end-label))
-                
-                                        ;else call supplied alternative generator
-                (. gen (mark else-label))
-                (. gen (pop))
-                
+            (when-not as-native
+              (. gen (visitCode))
+              (if (> (count pclasses) 18)
                 (else-gen gen m)
-            
-                (. gen (mark end-label))))
-            (. gen (returnValue))
+                (do
+                  (when is-overload
+                    (emit-get-var gen (overload-name mname pclasses))
+                    (. gen (dup))
+                    (. gen (ifNonNull found-label))
+                    (. gen (pop)))
+                  (emit-get-var gen mname)
+                  (. gen (dup))
+                  (. gen (ifNull else-label))
+                  (when is-overload
+                    (. gen (mark found-label)))
+                                          ;if found
+                  (.checkCast gen ifn-type)
+                  (when-not as-static
+                    (. gen (loadThis)))
+                                          ;box args
+                  (dotimes [i (count ptypes)]
+                    (. gen (loadArg i))
+                    (. clojure.lang.Compiler$HostExpr (emitBoxReturn nil gen (nth pclasses i))))
+                                          ;call fn
+                  (. gen (invokeInterface ifn-type (new Method "invoke" obj-type
+                                                        (to-types (replicate (+ (count ptypes)
+                                                                                (if as-static 0 1))
+                                                                             Object)))))
+                                          ;(into-array (cons obj-type
+                                          ;                 (replicate (count ptypes) obj-type))))))
+                                          ;unbox return
+                  (. gen (unbox rtype))
+                  (when (= (. rtype (getSort)) (. Type VOID))
+                    (. gen (pop)))
+                  (. gen (goTo end-label))
+
+                                          ;else call supplied alternative generator
+                  (. gen (mark else-label))
+                  (. gen (pop))
+
+                  (else-gen gen m)
+
+                  (. gen (mark end-label))))
+              (. gen (returnValue)))
             (. gen (endMethod))))
         ]
                                         ;start class definition
@@ -402,7 +405,7 @@
                                         ;add methods matching supers', if no fn -> call super
     (let [mm (non-private-methods super)]
       (doseq [^java.lang.reflect.Method meth (vals mm)]
-             (emit-forwarding-method (.getName meth) (.getParameterTypes meth) (.getReturnType meth) false
+             (emit-forwarding-method (.getName meth) (.getParameterTypes meth) (.getReturnType meth) false false
                                      (fn [^GeneratorAdapter gen ^Method m]
                                        (. gen (loadThis))
                                         ;push args
@@ -417,7 +420,7 @@
                 (if (contains? mm (method-sig meth))
                   mm
                   (do
-                    (emit-forwarding-method (.getName meth) (.getParameterTypes meth) (.getReturnType meth) false
+                    (emit-forwarding-method (.getName meth) (.getParameterTypes meth) (.getReturnType meth) false false
                                             emit-unsupported)
                     (assoc mm (method-sig meth) meth))))
               mm (mapcat #(.getMethods ^Class %) interfaces))
